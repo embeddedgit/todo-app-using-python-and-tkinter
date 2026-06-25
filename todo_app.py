@@ -48,11 +48,17 @@ def delete_task(task_id):
     conn.commit()
     conn.close()
 
+def update_task_title(task_id, new_title):
+    conn = sqlite3.connect(get_db_path())
+    conn.execute("UPDATE tasks SET title=? WHERE id=?", (new_title, task_id))
+    conn.commit()
+    conn.close()
+
 # ── Palette ──────────────────────────────────────────────────────────────────
 BG        = "#0f0f13"
 SURFACE   = "#1a1a24"
 CARD      = "#22222f"
-ACCENT    = "#7c6af7"       # violet
+ACCENT    = "#7c6af7"
 ACCENT2   = "#a78bfa"
 TEXT      = "#e8e8f0"
 SUBTEXT   = "#6b6b80"
@@ -60,8 +66,8 @@ DONE_CLR  = "#3d3d50"
 DONE_TXT  = "#55556b"
 BORDER    = "#2e2e3f"
 RED       = "#f87171"
+GREEN     = "#4ade80"
 FONT_MAIN = ("Segoe UI", 11)
-FONT_BIG  = ("Segoe UI", 20, "bold")
 FONT_BTN  = ("Segoe UI", 10, "bold")
 FONT_TASK = ("Segoe UI", 11)
 
@@ -75,7 +81,6 @@ class TodoApp(tk.Tk):
         self.configure(bg=BG)
         self.resizable(True, True)
 
-        # Set window icon (embedded as XBM for portability; replaced by .ico on exe)
         try:
             self.iconbitmap(self._get_icon_path())
         except Exception:
@@ -83,6 +88,7 @@ class TodoApp(tk.Tk):
 
         init_db()
         self._task_widgets = []
+        self._editing_id = None  # track which task is being edited
         self._build_ui()
         self._load_tasks()
 
@@ -95,13 +101,16 @@ class TodoApp(tk.Tk):
         # ── Header
         header = tk.Frame(self, bg=BG, padx=28, pady=24)
         header.pack(fill="x")
-
         tk.Label(header, text="Do It.", font=("Segoe UI", 26, "bold"),
                  bg=BG, fg=TEXT).pack(anchor="w")
         tk.Label(header, text="Keep it simple. Get it done.",
                  font=("Segoe UI", 10), bg=BG, fg=SUBTEXT).pack(anchor="w", pady=(2, 0))
 
-        # ── Thin accent line
+        # ── Hint label
+        tk.Label(header, text="💡 Double-click any task to edit it",
+                 font=("Segoe UI", 9), bg=BG, fg=SUBTEXT).pack(anchor="w", pady=(4, 0))
+
+        # ── Accent line
         tk.Frame(self, bg=ACCENT, height=2).pack(fill="x", padx=28)
 
         # ── Input row
@@ -161,6 +170,7 @@ class TodoApp(tk.Tk):
         for w in self._task_widgets:
             w.destroy()
         self._task_widgets.clear()
+        self._editing_id = None
 
         tasks = fetch_tasks()
         for task_id, title, done in tasks:
@@ -174,38 +184,42 @@ class TodoApp(tk.Tk):
         card = tk.Frame(self.task_frame, bg=card_bg, pady=0)
         card.pack(fill="x", pady=(0, 6))
 
-        # Left accent strip
         strip = tk.Frame(card, bg=ACCENT if not done else SUBTEXT, width=4)
         strip.pack(side="left", fill="y")
 
         inner = tk.Frame(card, bg=card_bg, padx=14, pady=12)
         inner.pack(side="left", fill="both", expand=True)
 
-        # Checkbox var
         var = tk.BooleanVar(value=done)
 
-        def on_toggle(tid=task_id, v=var, c=card, s=strip, ttl=title):
-            new_done = v.get()
-            toggle_task(tid, int(new_done))
+        def on_toggle(tid=task_id, v=var):
+            toggle_task(tid, int(v.get()))
             self._load_tasks()
 
-        chk_color = DONE_TXT if done else TEXT
         chk = tk.Checkbutton(
             inner, variable=var, command=on_toggle,
             bg=card_bg, activebackground=card_bg,
-            fg=chk_color, selectcolor=SURFACE,
+            fg=DONE_TXT if done else TEXT, selectcolor=SURFACE,
             bd=0, highlightthickness=0, cursor="hand2"
         )
         chk.pack(side="left")
 
         lbl = tk.Label(
-            inner, text=title, font=FONT_TASK,
+            inner, text=title, font=("Segoe UI", 11, "overstrike") if done else FONT_TASK,
             bg=card_bg, fg=DONE_TXT if done else TEXT,
-            anchor="w", wraplength=360, justify="left"
+            anchor="w", wraplength=320, justify="left", cursor="hand2"
         )
-        if done:
-            lbl.configure(font=("Segoe UI", 11, "overstrike"))
         lbl.pack(side="left", fill="x", expand=True, padx=(6, 0))
+
+        # ── Edit button (pencil)
+        edit_btn = tk.Button(
+            inner, text="✏", font=("Segoe UI", 9),
+            bg=card_bg, fg=SUBTEXT, activebackground=ACCENT,
+            activeforeground="#fff", relief="flat", bd=0,
+            cursor="hand2",
+            command=lambda tid=task_id, ttl=title, c=card, l=lbl, eb=None: self._start_edit(tid, ttl, inner, lbl, card)
+        )
+        edit_btn.pack(side="right", padx=(4, 0))
 
         del_btn = tk.Button(
             inner, text="✕", font=("Segoe UI", 9, "bold"),
@@ -216,7 +230,46 @@ class TodoApp(tk.Tk):
         )
         del_btn.pack(side="right")
 
+        # Double click label to edit too
+        lbl.bind("<Double-Button-1>", lambda e, tid=task_id, ttl=title: self._start_edit(tid, ttl, inner, lbl, card))
+
         self._task_widgets.append(card)
+
+    def _start_edit(self, task_id, current_title, inner, lbl, card):
+        # If already editing something else, cancel it first
+        if self._editing_id is not None and self._editing_id != task_id:
+            self._load_tasks()
+            return
+
+        self._editing_id = task_id
+
+        # Hide the label
+        lbl.pack_forget()
+
+        # Inline edit entry
+        edit_var = tk.StringVar(value=current_title)
+        edit_entry = tk.Entry(
+            inner, textvariable=edit_var, font=FONT_TASK,
+            bg=SURFACE, fg=TEXT, insertbackground=ACCENT2,
+            relief="flat", bd=0, highlightthickness=2,
+            highlightbackground=ACCENT, highlightcolor=ACCENT2
+        )
+        edit_entry.pack(side="left", fill="x", expand=True, ipady=4, ipadx=6, padx=(6, 6))
+        edit_entry.focus()
+        edit_entry.select_range(0, "end")
+
+        def save_edit(event=None):
+            new_title = edit_var.get().strip()
+            if new_title and new_title != current_title:
+                update_task_title(task_id, new_title)
+            self._load_tasks()
+
+        def cancel_edit(event=None):
+            self._load_tasks()
+
+        edit_entry.bind("<Return>", save_edit)
+        edit_entry.bind("<Escape>", cancel_edit)
+        edit_entry.bind("<FocusOut>", save_edit)
 
     def _add(self):
         title = self.entry.get().strip()
