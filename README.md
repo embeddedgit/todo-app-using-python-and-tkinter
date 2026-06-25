@@ -19,6 +19,7 @@ No accounts. No cloud. No bloat. Just tasks.
 - Delete tasks with one click
 - Live stats — see how many tasks are done vs remaining
 - 100% offline — data stored locally on your PC
+  You can now edit task! ![New Feature](https://img.shields.io/badge/New-Edit%20Tasks-brightgreen?style=flat-square&logo=sparkles)
 - Shareable — send the `.exe` + `tasks.db` to a friend
 
 ---
