@@ -1,0 +1,19 @@
+# PyInstaller build artifacts
+build/
+__pycache__/
+*.spec.bak
+
+# Personal data — don't share your tasks!
+tasks.db
+
+# Python cache
+*.pyc
+*.pyo
+*.pyd
+
+# VS Code
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db
